@@ -1,0 +1,23 @@
+#Install required libraries
+!pip install -q diffusers transformers accelerate
+
+#Import required modules
+from diffusers import AutoPipelineForText2Image
+import torch
+from IPython.display import display
+
+#Load the SDXL-Turbo model
+pipe = AutoPipelineForText2Image.from_pretrained(
+    "stabilityai/sdxl-turbo", dtype=torch.float16, variant="fp16"
+)
+pipe = pipe.to("cuda")
+
+
+#Set your prompt
+prompt = "Girl at sea beach in sunset"
+
+#Generate the image
+image = pipe(prompt=prompt, num_inference_steps=1, guidance_scale=0.0).images
+
+#Display the image
+display(image[0])
