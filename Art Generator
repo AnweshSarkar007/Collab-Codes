@@ -1,0 +1,86 @@
+from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline, AutoencoderKL
+from diffusers import DDIMScheduler, EulerAncestralDiscreteScheduler
+from diffusers.utils import load_image
+from pathlib import Path
+from PIL import Image
+import matplotlib.pyplot as plt
+import torch
+import numpy as np
+import cv2
+import os
+from google.colab import files
+from PIL import Image
+controlnet = ControlNetModel.from_pretrained(
+    "xinsir/anime-painter",
+    torch_dtype=torch.float16
+)
+controlnet = controlnet.to("cuda",dtype=torch.float16)
+pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
+    "John6666/studio-chatgpt-ghibli-illustrious-v10-sdxl",
+    controlnet=controlnet,
+    safety_checker=None,
+    torch_dtype=torch.float16,
+)
+pipe = pipe.to("cuda",dtype=torch.float16)
+
+def resize_image_with_aspect_ratio(image_path, max_dim=1024):
+    img = Image.open(image_path)
+    original_width, original_height = img.size
+    # Determine the scaling factor
+    scale = min(max_dim / original_width, max_dim / original_height)
+    # Calculate new size while maintaining aspect ratio
+    new_width = int(original_width * scale)
+    new_height = int(original_height * scale)
+    resized_img = img.resize((new_width, new_height))
+    return resized_img
+uploaded = files.upload()
+
+for filename in uploaded.keys():
+    image_path = filename
+input_image = resize_image_with_aspect_ratio(image_path, max_dim=1024)
+input_image = input_image.convert("RGB")
+plt.figure(figsize=(7,7))
+plt.imshow(input_image)
+plt.show()
+def make_canny_condition(image):
+    org_shape = image.size
+    image = np.array(image.resize((256,256)), dtype=np.uint8)
+    image = cv2.Canny(image, 100,200)
+    image = image[:, :, None]
+    image = np.concatenate([image, image, image], axis=2)
+    image = Image.fromarray(image)
+    return image.resize(org_shape)
+control_image_canny = make_canny_condition(input_image)
+plt.imshow(control_image_canny)
+plt.show()
+# prompt = ''' men looking at the camera''' #musk.png
+prompt = '''ghibli style''' #girl_cat.png
+prompt2 = prompt
+negative_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality'
+
+
+image_stage_1 = pipe(
+    prompt=prompt,
+    prompt2=prompt2,
+    # negative_prompt=neg_prompt,
+    num_inference_steps=30,#0-1000
+    strength=0.4,#0.1-1 (Howmuch of the original image you want to keep)
+    eta=1.0,
+    image=input_image,
+    control_image=control_image_canny,
+    controlnet_conditioning_scale= 0.3,# 0.5-1.2  (Howmuch importnace to give the black and white control_image)
+    guidance_scale=5,# 5-7 (Importnace for the text prompt)
+    generator=torch.manual_seed(7777777),
+).images[0]
+plt.figure(figsize=(20, 10))
+plt.subplot(1, 2, 1)
+plt.imshow(input_image)
+plt.subplot(1, 2, 2)
+plt.title("After 1st stage")
+plt.imshow(image_stage_1 )
+plt.show()
+
+
+# Save the generated image
+img_name = image_path.split('/')[-1].split('.')[0]
+image_stage_1.save(f'generated_{img_name}.png')  # Save the image
