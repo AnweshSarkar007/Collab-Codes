@@ -1,0 +1,104 @@
+from google.colab import drive
+import torch
+!pip install open3d
+from PIL import Image
+from torchvision import transforms
+import matplotlib.pyplot as plt
+import numpy as np
+import open3d as o3d
+import cv2
+import torchvision.models.segmentation as segmentation
+
+
+# Step 1: Mounting Google Drive
+drive.mount('/content/drive')
+
+
+# Step 2: Load the image from Google Drive
+image_path = "/content/drive/My Drive/DATA/CAT.jpg"  # Replace with your image path
+image = Image.open(image_path).convert("RGB")  # Ensure RGB format
+
+
+
+# Step 3: Define transformations for depth estimation
+input_transform = transforms.Compose([
+    transforms.Resize((384, 384)),  # Resize to model input size
+    transforms.ToTensor(),  # Convert to tensor
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Normalize for segmentation
+])
+
+
+
+depth_transform = transforms.Compose([
+    transforms.Resize((384, 384)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.4755, 0.4565, 0.4065], std=[0.2295, 0.2245, 0.2255]),  # Normalize for MiDaS
+])
+
+
+
+
+# Step 4: Perform Image Segmentation (DeepLabV3)
+segmentation_model = segmentation.deeplabv3_resnet101(pretrained=True).eval()
+segmentation_model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
+input_tensor = input_transform(image).unsqueeze(0).to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+
+with torch.no_grad():
+    output = segmentation_model(input_tensor)['out'][0]
+segmentation_map = torch.argmax(output, dim=0).cpu().numpy()
+
+
+
+# Step 5: Load the pre-trained MiDaS model for depth estimation
+midas = torch.hub.load('intel-isl/MiDaS', 'DPT_Hybrid').eval()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+midas.to(device)
+
+
+
+
+# Step 6: Process each segmented region
+unique_segments = np.unique(segmentation_map)
+
+plt.figure(figsize=(12, 6))
+plt.subplot(1, len(unique_segments) + 1, 1)
+plt.title("Original Image")
+plt.imshow(image)
+plt.axis("off")
+
+
+
+
+# Resize segmentation map to match the original image size
+segmentation_map_resized = cv2.resize(segmentation_map, (image.width, image.height), interpolation=cv2.INTER_NEAREST)
+
+for i, segment in enumerate(unique_segments):
+    # Create a binary mask for the current segment
+    mask = (segmentation_map_resized == segment).astype(np.uint8)  # Convert to uint8 (0 or 1)
+
+    # Ensure the mask has the same dimensions as the original image
+    mask = np.expand_dims(mask, axis=-1)  # Add a channel dimension if needed
+
+    # Apply the mask to the original image
+    masked_image = np.array(image) * mask
+
+    # Apply depth estimation on the masked region
+    segmented_image = Image.fromarray(masked_image)
+    input_tensor = depth_transform(segmented_image).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        depth_map = midas(input_tensor)
+        depth_map = depth_map.squeeze().cpu().numpy()
+
+    # Normalize for visualization
+    depth_map_normalized = (depth_map - np.min(depth_map)) / (np.max(depth_map) - np.min(depth_map))
+
+    # Display segmented depth map
+    plt.subplot(1, len(unique_segments) + 1, i + 2)
+    plt.title(f"Segment {segment}")
+    plt.imshow(depth_map_normalized, cmap="plasma")
+    plt.axis("off")
+
+plt.show()
+
