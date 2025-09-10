@@ -1,0 +1,115 @@
+!pip install -q pillow-heif
+
+import os
+import io
+import base64
+from PIL import Image
+import pillow_heif
+from google.colab import files
+from IPython.display import display, HTML
+from PIL import UnidentifiedImageError
+
+def convert_image(file_bytes, output_format, **kwargs):
+    try:
+        pillow_heif.register_heif_opener()
+        with Image.open(io.BytesIO(file_bytes)) as image:
+            output_format_upper = output_format.upper()
+            if output_format_upper in ("JPEG", "JPG"):
+                if image.mode in ("RGBA", "P"):
+                    print("Source image has transparency. Converting to RGB for JPEG compatibility...")
+                    image = image.convert("RGB")
+            
+            output_buffer = io.BytesIO()
+            image.save(output_buffer, format=output_format, **kwargs)
+            converted_bytes = output_buffer.getvalue()
+            file_extension = 'jpeg' if output_format_upper == 'JPG' else output_format.lower()
+            return converted_bytes, file_extension
+    except Exception as e:
+        raise e
+
+def run_converter():
+    output_format = ""
+    try:
+        print("--- Universal Image Converter ---")
+        print("Step 1: Please upload an image file.")
+        uploaded = files.upload()
+        if not uploaded:
+            print("\nUpload canceled. No file selected.")
+            return
+        
+        input_filename = next(iter(uploaded))
+        input_bytes = uploaded[input_filename]
+        print(f"\nSuccessfully uploaded '{input_filename}' ({len(input_bytes)} bytes).")
+        print("\nStep 2: Specify the output format.")
+        
+        output_format = input("Enter the desired output format (e.g., png, jpg, heic, webp): ").strip().lower()
+        if not output_format:
+            print("\nNo output format specified. Aborting.")
+            return
+            
+        save_options = {}
+        if output_format in ('jpeg', 'jpg', 'heic', 'webp'):
+            try:
+                quality_str = input(f"Enter quality for {output_format} (1-100, press Enter for default): ")
+                if quality_str:
+                    save_options['quality'] = int(quality_str)
+            except ValueError:
+                print("Invalid quality value. Using default.")
+
+        print(f"\nConverting '{input_filename}' to {output_format.upper()}...")
+        converted_bytes, file_extension = convert_image(input_bytes, output_format, **save_options)
+        
+        base_name, _ = os.path.splitext(input_filename)
+        output_filename = f"{base_name}_converted.{file_extension}"
+        print(f"\nConversion successful! Output file: '{output_filename}' ({len(converted_bytes)} bytes).")
+        print("Step 3: Click the button below to download the converted file.")
+        
+        b64 = base64.b64encode(converted_bytes).decode()
+        mime_type = f"image/{file_extension}"
+        
+        button_html = f'''
+          <style>
+            .download-button {{
+              display: inline-block;
+              padding: 8px 16px;
+              font-size: 14px;
+              font-weight: bold;
+              text-align: center;
+              text-decoration: none;
+              color: #ffffff;
+              background-color: #1a73e8;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+              box-shadow: 0 2px 4px 0 rgba(0,0,0,0.2);
+              transition: 0.3s;
+            }}
+            .download-button:hover {{
+              background-color: #4285f4;
+              box-shadow: 0 3px 6px 0 rgba(0,0,0,0.2);
+            }}
+          </style>
+          <a download="{output_filename}" href="data:{mime_type};base64,{b64}" class="download-button">
+            Download "{output_filename}"
+          </a>
+        '''
+        display(HTML(button_html))
+        print("\nProcess complete.")
+
+    except FileNotFoundError:
+        print("\nERROR: An issue occurred with file handling. Please try again.")
+    except pillow_heif.HeifError as e:
+        print(f"\nERROR: A problem occurred while processing the HEIC file: {e}")
+        print("The file may be corrupted or in an unsupported HEIC sub-format.")
+    except UnidentifiedImageError:
+        print("\nERROR: The uploaded file is not a recognized image format.")
+        print("Please upload a valid image file (e.g., jpg, png, heic).")
+    except (KeyError, ValueError) as e:
+        print(f"\nERROR: The specified output format '{output_format}' is not supported by Pillow.")
+        print("Please choose a common format like 'png', 'jpeg', 'bmp', 'tiff', or 'webp'.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
+        print("Please check your inputs and try again.")
+
+if __name__ == "__main__":
+    run_converter()
