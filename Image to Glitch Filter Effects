@@ -1,0 +1,105 @@
+import cv2
+import numpy as np
+import random
+import os
+import zipfile
+from google.colab import files
+from google.colab.patches import cv2_imshow
+
+def add_rgb_split(image, shift_amount=10):
+    glitched_image = image.copy()
+    b, g, r = cv2.split(glitched_image)
+    r = np.roll(r, shift_amount, axis=1)
+    glitched_image = cv2.merge((b, g, r))
+    return glitched_image
+
+def add_scan_lines(image, line_intensity=0.7, line_gap=4):
+    glitched_image = image.copy()
+    height, width, _ = glitched_image.shape
+    for i in range(0, height, line_gap):
+        glitched_image[i, :, :] = glitched_image[i, :, :] * line_intensity
+    return glitched_image
+
+def add_block_swap(image, block_size=20, num_swaps=50):
+    glitched_image = image.copy()
+    height, width, _ = glitched_image.shape
+    num_blocks_h = height // block_size
+    num_blocks_v = width // block_size
+    
+    if num_blocks_h < 2 or num_blocks_v < 2:
+        print("Image is too small for the chosen block size. Skipping block swap.")
+        return glitched_image
+
+    for _ in range(num_swaps):
+        rand_y1, rand_x1 = random.randint(0, num_blocks_h - 1), random.randint(0, num_blocks_v - 1)
+        rand_y2, rand_x2 = random.randint(0, num_blocks_h - 1), random.randint(0, num_blocks_v - 1)
+
+        y1_start, y1_end = rand_y1 * block_size, (rand_y1 + 1) * block_size
+        x1_start, x1_end = rand_x1 * block_size, (rand_x1 + 1) * block_size
+        y2_start, y2_end = rand_y2 * block_size, (rand_y2 + 1) * block_size
+        x2_start, x2_end = rand_x2 * block_size, (rand_x2 + 1) * block_size
+
+        block1 = glitched_image[y1_start:y1_end, x1_start:x1_end].copy()
+        block2 = glitched_image[y2_start:y2_end, x2_start:x2_end].copy()
+        
+        glitched_image[y1_start:y1_end, x1_start:x1_end] = block2
+        glitched_image[y2_start:y2_end, x2_start:x2_end] = block1
+        
+    return glitched_image
+
+print("✨ Welcome to the Glitch Art Generator! ✨")
+print("Please upload an image file to begin.")
+
+uploaded = files.upload()
+
+if len(uploaded) == 0:
+    print("\nNo file was uploaded. Please run the cell again.")
+else:
+    input_filename = next(iter(uploaded))
+    print(f"\nProcessing uploaded file: '{input_filename}'...")
+    
+    file_bytes = np.frombuffer(uploaded[input_filename], np.uint8)
+    original_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+    if original_image is None:
+        print("Error: Could not read the file. Please ensure it's a valid image.")
+    else:
+        base_name, extension = os.path.splitext(input_filename)
+        
+        print("\nApplying glitch effects...")
+        rgb_split_image = add_rgb_split(original_image, shift_amount=20)
+        scan_lines_image = add_scan_lines(original_image, line_intensity=0.6, line_gap=5)
+        block_swap_image = add_block_swap(original_image, block_size=25, num_swaps=100)
+        
+        combined_image = add_rgb_split(original_image, shift_amount=15)
+        combined_image = add_scan_lines(combined_image, line_intensity=0.7, line_gap=4)
+        combined_image = add_block_swap(combined_image, block_size=20, num_swaps=75)
+        
+        print("\n🖼️ Displaying Results:")
+        print("\nOriginal Image:")
+        cv2_imshow(original_image)
+        
+        print("\nCombined Glitch Effects:")
+        cv2_imshow(combined_image)
+        
+        print("\n💾 Preparing your files for a single download...")
+        
+        output_filenames = {
+            f"{base_name}_glitch_rgb_split{extension}": rgb_split_image,
+            f"{base_name}_glitch_scan_lines{extension}": scan_lines_image,
+            f"{base_name}_glitch_block_swap{extension}": block_swap_image,
+            f"{base_name}_glitch_combined{extension}": combined_image
+        }
+        zip_filename = f"{base_name}_glitched_images.zip"
+        
+        for filename, image_data in output_filenames.items():
+            cv2.imwrite(filename, image_data)
+            
+        with zipfile.ZipFile(zip_filename, 'w') as zipf:
+            for filename in output_filenames:
+                zipf.write(filename)
+                os.remove(filename)
+
+        print(f"✅ All files have been bundled into '{zip_filename}'")
+        print("Your download will start automatically. If it doesn't, check your browser's popup blocker.")
+        files.download(zip_filename)
